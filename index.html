@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>
+  :root { color-scheme: light; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  body { margin: 0; }
+  [hidden] { display: none !important; }
+</style>
+<title>Magic 8 Ball</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bowlby+One&family=Barlow+Condensed:wght@500;600&display=swap">
+<style>
+  /* Layout: one centered column, a single large ball as the only focal object, hint and sensor status beneath. */
+  :root {
+    --bg: #d9e3df;
+    --fg: #12201c;
+    --muted: #4b5f59;
+    --shadow: rgba(10, 25, 20, 0.38);
+    --ball-hi: #5d687d;
+    --ball-mid: #1a2030;
+    --ball-lo: #04060a;
+    --eight-bg: #f4f6f5;
+    --eight-fg: #0a0d12;
+    --die-hi: #3b5cdb;
+    --die-lo: #0b1558;
+    --die-line: #8fb0ff;
+    --die-text: #eaf1ff;
+    --ok: #1c8a5e;
+    --warn: #b7791f;
+    --focus: #e0a82e;
+    --cond: "Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
+    --chunk: "Bowlby One", "Arial Black", system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0e2a23;
+      --fg: #e6f0ec;
+      --muted: #9bb5ac;
+      --shadow: rgba(0, 0, 0, 0.6);
+      --ok: #3ecf8e;
+      --warn: #e0a82e;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0e2a23;
+    --fg: #e6f0ec;
+    --muted: #9bb5ac;
+    --shadow: rgba(0, 0, 0, 0.6);
+    --ok: #3ecf8e;
+    --warn: #e0a82e;
+    color-scheme: dark;
+  }
+
+  html { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--cond);
+    min-height: 100%;
+    padding-block: 20px 28px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 28px;
+  }
+
+  h1 {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    text-align: center;
+  }
+
+  .stage {
+    flex: 1;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 0;
+  }
+
+  .ball-wrap {
+    container-type: inline-size;
+    width: min(100%, 360px);
+    position: relative;
+  }
+  .ball-wrap::after {
+    content: "";
+    position: absolute;
+    left: 14%;
+    right: 14%;
+    bottom: -7%;
+    height: 8%;
+    background: radial-gradient(ellipse at center, var(--shadow), transparent 70%);
+    filter: blur(4px);
+    pointer-events: none;
+  }
+
+  .ball {
+    all: unset;
+    box-sizing: border-box;
+    display: block;
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1;
+    border-radius: 50%;
+    cursor: pointer;
+    background: radial-gradient(circle at 32% 24%, var(--ball-hi) 0%, var(--ball-mid) 22%, var(--ball-lo) 62%, #000 100%);
+    box-shadow: inset -3cqw -4cqw 8cqw rgba(0, 0, 0, 0.55), inset 2cqw 2cqw 5cqw rgba(255, 255, 255, 0.06);
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .ball::before {
+    content: "";
+    position: absolute;
+    top: 7%;
+    left: 15%;
+    width: 36%;
+    height: 19%;
+    border-radius: 50%;
+    background: radial-gradient(ellipse at center, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0) 70%);
+    transform: rotate(-26deg);
+    pointer-events: none;
+  }
+  .ball:focus-visible { outline: 3px solid var(--focus); outline-offset: 6px; }
+  .ball.shaking { animation: wobble 1s cubic-bezier(.36, .07, .19, .97) both; }
+
+  @keyframes wobble {
+    0%   { transform: translate(0, 0) rotate(0); }
+    8%   { transform: translate(-14px, 6px) rotate(-7deg); }
+    18%  { transform: translate(16px, -8px) rotate(6deg); }
+    28%  { transform: translate(-18px, 5px) rotate(-8deg); }
+    40%  { transform: translate(15px, -6px) rotate(7deg); }
+    52%  { transform: translate(-12px, 7px) rotate(-5deg); }
+    64%  { transform: translate(10px, -4px) rotate(4deg); }
+    78%  { transform: translate(-5px, 3px) rotate(-2deg); }
+    100% { transform: translate(0, 0) rotate(0); }
+  }
+
+  .face {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 52%;
+    aspect-ratio: 1;
+    transform: translate(-50%, -50%);
+    display: block;
+  }
+  .eight, .window {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    display: block;
+    transition: opacity 0.35s ease;
+  }
+  .eight {
+    background: var(--eight-bg);
+    color: var(--eight-fg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--chunk);
+    font-size: 32cqw;
+    line-height: 1;
+    padding-top: 1.5cqw;
+    box-shadow: inset 0 -2cqw 4cqw rgba(0, 0, 0, 0.18);
+  }
+  .window {
+    overflow: hidden;
+    background: radial-gradient(circle at 40% 32%, var(--die-hi), var(--die-lo) 72%);
+    box-shadow: 0 0 0 0.7cqw rgba(255, 255, 255, 0.1), inset 0 0 0 0.8cqw rgba(0, 0, 0, 0.6), inset 0 2cqw 4cqw rgba(0, 0, 0, 0.5);
+    opacity: 0;
+  }
+  .window svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .answer {
+    position: absolute;
+    inset: 33% 13% 12% 13%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    font-family: var(--cond);
+    font-weight: 600;
+    font-size: 5.8cqw;
+    line-height: 1.05;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    text-wrap: balance;
+    color: var(--die-text);
+    text-shadow: 0 0 1.4cqw rgba(143, 176, 255, 0.55);
+    opacity: 0;
+    transition: opacity 0.5s ease 0.1s;
+  }
+
+  .face[data-state="idle"] .eight { opacity: 1; }
+  .face[data-state="mixing"] .eight,
+  .face[data-state="answer"] .eight { opacity: 0; }
+  .face[data-state="mixing"] .window,
+  .face[data-state="answer"] .window { opacity: 1; }
+  .face[data-state="answer"] .answer { opacity: 1; }
+
+  .hint {
+    margin: 0;
+    font-size: 22px;
+    font-weight: 500;
+    text-align: center;
+    text-wrap: balance;
+  }
+  .status {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 16px;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+    text-align: center;
+  }
+  .dot {
+    flex: none;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--muted);
+  }
+  .status[data-state="on"] .dot { background: var(--ok); }
+  .status[data-state="wait"] .dot { background: var(--warn); }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ball.shaking { animation: none; }
+    .eight, .window, .answer { transition-duration: 0.01s; transition-delay: 0s; }
+  }
+</style>
+
+</head>
+<body>
+<h1>Magic 8 Ball</h1>
+
+<div class="stage">
+  <div class="ball-wrap">
+    <button class="ball" id="ball" type="button" aria-label="Shake the magic 8 ball">
+      <span class="face" id="face" data-state="idle">
+        <span class="eight" aria-hidden="true">8</span>
+        <span class="window">
+          <svg viewBox="0 0 100 100" aria-hidden="true" focusable="false">
+            <polygon points="50,7 98,92 2,92" fill="rgba(143,176,255,0.14)" stroke="rgba(143,176,255,0.4)" stroke-width="1.2" stroke-linejoin="round"/>
+          </svg>
+          <span class="answer" id="answer" aria-live="polite"></span>
+        </span>
+      </span>
+    </button>
+  </div>
+</div>
+
+<p class="hint">Ask a yes-or-no question, then shake.</p>
+<p class="status" id="status" data-state="wait" role="status"><i class="dot"></i><span id="statusText">Looking for a motion sensor…</span></p>
+
+<script>
+(function () {
+  var ANSWERS = [
+    "It is certain", "It is decidedly so", "Without a doubt", "Yes, definitely", "You may rely on it",
+    "As I see it, yes", "Most likely", "Outlook good", "Yes", "Signs point to yes",
+    "Reply hazy, try again", "Ask again later", "Better not tell you now", "Cannot predict now", "Concentrate and ask again",
+    "Don't count on it", "My reply is no", "My sources say no", "Outlook not so good", "Very doubtful"
+  ];
+
+  var ball = document.getElementById("ball");
+  var face = document.getElementById("face");
+  var answerEl = document.getElementById("answer");
+  var statusEl = document.getElementById("status");
+  var statusText = document.getElementById("statusText");
+  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  var busy = false, last = -1, live = false, listening = false;
+  var needsPermission = false, permissionAsked = false;
+  var lastShakeAt = 0, jolts = [], lx = null, ly = 0, lz = 0;
+
+  function setStatus(state, text) {
+    statusEl.setAttribute("data-state", state);
+    statusText.textContent = text;
+  }
+
+  function pick() {
+    var i;
+    do { i = Math.floor(Math.random() * ANSWERS.length); } while (i === last);
+    last = i;
+    return ANSWERS[i];
+  }
+
+  function shake() {
+    if (busy) return;
+    busy = true;
+    face.setAttribute("data-state", "mixing");
+    ball.classList.add("shaking");
+    try { if (navigator.vibrate) navigator.vibrate([60, 40, 60, 40, 90]); } catch (e) {}
+    setTimeout(function () {
+      answerEl.textContent = pick();
+      face.setAttribute("data-state", "answer");
+      ball.classList.remove("shaking");
+      setTimeout(function () { busy = false; }, 450);
+    }, reduce ? 250 : 1000);
+  }
+
+  function onMotion(e) {
+    var a = e.accelerationIncludingGravity;
+    if (!a || a.x == null || a.y == null || a.z == null) return;
+    if (!live) {
+      live = true;
+      setStatus("on", "Shake sensor on. Shake your phone.");
+    }
+    if (lx !== null) {
+      var d = Math.abs(a.x - lx) + Math.abs(a.y - ly) + Math.abs(a.z - lz);
+      var now = performance.now();
+      if (d > 20) {
+        jolts = jolts.filter(function (t) { return now - t < 700; });
+        jolts.push(now);
+        if (jolts.length >= 3 && !busy && now - lastShakeAt > 1800) {
+          lastShakeAt = now;
+          jolts = [];
+          shake();
+        }
+      }
+    }
+    lx = a.x; ly = a.y; lz = a.z;
+  }
+
+  function listen() {
+    if (listening) return;
+    listening = true;
+    window.addEventListener("devicemotion", onMotion);
+    setTimeout(function () {
+      if (!live) setStatus("off", "No motion data in this view. Tap the ball.");
+    }, 2500);
+  }
+
+  ball.addEventListener("click", function () {
+    if (needsPermission && !permissionAsked) {
+      permissionAsked = true;
+      try {
+        DeviceMotionEvent.requestPermission().then(function (r) {
+          if (r === "granted") {
+            setStatus("wait", "Looking for a motion sensor…");
+            listen();
+          } else {
+            setStatus("off", "Motion access declined. Tap the ball.");
+          }
+        }).catch(function () {
+          setStatus("off", "Motion access unavailable. Tap the ball.");
+        });
+      } catch (e) {
+        setStatus("off", "Motion access unavailable. Tap the ball.");
+      }
+    }
+    shake();
+  });
+
+  if (!("DeviceMotionEvent" in window)) {
+    setStatus("off", "No motion sensor here. Tap the ball.");
+  } else if (typeof DeviceMotionEvent.requestPermission === "function") {
+    needsPermission = true;
+    setStatus("wait", "Tap the ball once to turn on shake.");
+  } else {
+    listen();
+  }
+})();
+</script>
+
+</body>
+</html>
