@@ -162,7 +162,7 @@
     position: absolute;
     left: 50%;
     top: 50%;
-    width: 52%;
+    width: 56%;
     aspect-ratio: 1;
     transform: translate(calc(-50% + var(--fx)), calc(-50% + var(--fy)));
     display: block;
@@ -181,7 +181,7 @@
     align-items: center;
     justify-content: center;
     font-family: var(--chunk);
-    font-size: 32cqw;
+    font-size: 34cqw;
     line-height: 1;
     padding-top: 1.5cqw;
     box-shadow: inset 0 -2cqw 4cqw rgba(0, 0, 0, 0.18);
@@ -193,24 +193,23 @@
     opacity: 0;
   }
   .window svg { position: absolute; inset: 0; width: 100%; height: 100%; }
-  .answer {
-    position: absolute;
-    inset: 33% 13% 12% 13%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    text-align: center;
+  .window text {
     font-family: var(--cond);
     font-weight: 600;
-    font-size: 5.8cqw;
-    line-height: 1.05;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-    text-wrap: balance;
-    color: var(--die-text);
-    text-shadow: 0 0 1.4cqw rgba(143, 176, 255, 0.55);
+    fill: var(--die-text);
+    text-anchor: middle;
+  }
+  .answer {
     opacity: 0;
     transition: opacity 0.5s ease 0.1s;
+  }
+  .sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
   }
 
   .face[data-state="idle"] .eight { opacity: 1; }
@@ -266,10 +265,11 @@
       <span class="face" id="face" data-state="idle">
         <span class="eight" aria-hidden="true">8</span>
         <span class="window">
-          <svg viewBox="0 0 100 100" aria-hidden="true" focusable="false">
-            <polygon points="50,7 98,92 2,92" fill="rgba(143,176,255,0.14)" stroke="rgba(143,176,255,0.4)" stroke-width="1.2" stroke-linejoin="round"/>
+          <svg id="die" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
+            <polygon points="50,4 89.8,73 10.2,73" fill="rgba(143,176,255,0.14)" stroke="rgba(143,176,255,0.45)" stroke-width="1.6" stroke-linejoin="round"/>
+            <g class="answer" id="answer"></g>
           </svg>
-          <span class="answer" id="answer" aria-live="polite"></span>
+          <span class="sr" id="srAnswer" aria-live="polite"></span>
         </span>
       </span>
     </button>
@@ -370,6 +370,77 @@
     return ANSWERS[i];
   }
 
+  // Lays an answer out inside the triangle: the largest font that fits, with each line limited to the triangle's width at its height.
+  var NS = "http://www.w3.org/2000/svg";
+  var dieSvg = document.getElementById("die");
+  var srAnswer = document.getElementById("srAnswer");
+  var meter = document.createElementNS(NS, "text");
+  meter.setAttribute("visibility", "hidden");
+  meter.setAttribute("x", "0");
+  meter.setAttribute("y", "0");
+  dieSvg.appendChild(meter);
+  var widthCache = {};
+  var currentAnswer = "";
+
+  // Triangle apex at y=4, base at y=73, 79.6 wide at the base (in the window's 100-unit space).
+  function triWidth(y) { return clamp((y - 4) / 69, 0, 1) * 79.6; }
+
+  function textWidth(str, size) {
+    var key = size + "|" + str;
+    if (widthCache[key] === undefined) {
+      meter.setAttribute("font-size", size);
+      meter.textContent = str;
+      widthCache[key] = meter.getComputedTextLength();
+    }
+    return widthCache[key];
+  }
+
+  function layoutAnswer(text) {
+    var words = text.toUpperCase().split(" ");
+    var PAD = 7;                                    // clearance from the slanted edges
+    for (var size = 10.5; size >= 4.5; size -= 0.5) {
+      var lineH = size * 1.14;
+      for (var n = 1; n <= 4; n++) {
+        var bottom = Math.min(65.5, 52 + ((n - 1) * lineH + size * 0.7) / 2);   // baseline of the last line, kept clear of the base
+        var lines = [], cur = "", k = 0, ok = true;
+        for (var i = 0; i < words.length && ok; i++) {
+          var limit = triWidth(bottom - (n - 1 - k) * lineH - size * 0.7) - PAD;
+          var tryStr = cur ? cur + " " + words[i] : words[i];
+          if (textWidth(tryStr, size) <= limit) { cur = tryStr; continue; }
+          if (!cur || k + 1 >= n) { ok = false; break; }
+          lines.push(cur);
+          k++;
+          cur = words[i];
+          limit = triWidth(bottom - (n - 1 - k) * lineH - size * 0.7) - PAD;
+          if (textWidth(cur, size) > limit) ok = false;
+        }
+        if (ok && cur) lines.push(cur);
+        if (ok && lines.length === n) return { size: size, lineH: lineH, bottom: bottom, lines: lines };
+      }
+    }
+    return { size: 4.5, lineH: 5.2, bottom: 58, lines: words };  // last resort: one word per line
+  }
+
+  function setAnswer(text) {
+    currentAnswer = text;
+    var L = layoutAnswer(text);
+    while (answerEl.firstChild) answerEl.removeChild(answerEl.firstChild);
+    L.lines.forEach(function (line, i) {
+      var t = document.createElementNS(NS, "text");
+      t.setAttribute("x", "50");
+      t.setAttribute("y", (L.bottom - (L.lines.length - 1 - i) * L.lineH).toFixed(2));
+      t.setAttribute("font-size", L.size);
+      t.textContent = line;
+      answerEl.appendChild(t);
+    });
+    srAnswer.textContent = text;
+  }
+
+  // Once the web font arrives its widths differ from the fallback, so measure again.
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(function () { widthCache = {}; if (currentAnswer) setAnswer(currentAnswer); });
+  }
+
   function shake() {
     if (busy) return;
     busy = true;
@@ -377,7 +448,7 @@
     ball.classList.add("shaking");
     try { if (navigator.vibrate) navigator.vibrate([60, 40, 60, 40, 90]); } catch (e) {}
     setTimeout(function () {
-      answerEl.textContent = pick();
+      setAnswer(pick());
       face.setAttribute("data-state", "answer");
       ball.classList.remove("shaking");
       setTimeout(function () { busy = false; }, 450);
