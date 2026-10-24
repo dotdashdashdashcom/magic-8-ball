@@ -301,51 +301,34 @@
   var lastShakeAt = 0, jolts = [], lx = null, ly = 0, lz = 0;
 
   // Tilt: the ball leans and the window slides toward whichever side of the phone is lower.
+  // No smoothing: every sensor reading is applied as it arrives.
   var tiltEl = document.getElementById("tilt");
   // iOS reports gravity with the opposite sign to Android.
   var flip = (typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission === "function") ? -1 : 1;
-  var pose = null, rest = null;
-  var tgt = { r: 0, p: 0 }, cur = { r: 0, p: 0 };
-  var tiltRunning = false, lastFrame = 0;
+  var rest = null, lastPitch = 0;
+  var FACE_GAIN = 0.5, FACE_MAX = 10;     // window slide in % of ball width per degree of lean, and its limit
+  var ROT_GAIN = 1.2, ROT_MAX = 24;       // ball lean in degrees per degree of phone lean, and its limit
 
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
   function setTilt(roll, pitch) {
-    tgt.r = roll;
-    tgt.p = pitch;
-    if (reduce || tiltRunning) return;
-    tiltRunning = true;
-    lastFrame = performance.now();
-    requestAnimationFrame(frame);
-  }
-
-  function frame(now) {
-    var dt = Math.min(0.05, (now - lastFrame) / 1000);
-    lastFrame = now;
-    var k = 1 - Math.exp(-dt / 0.12);
-    var tr = busy ? 0 : tgt.r, tp = busy ? 0 : tgt.p;
-    cur.r += (tr - cur.r) * k;
-    cur.p += (tp - cur.p) * k;
-    tiltEl.style.setProperty("--fx", clamp(cur.r * 0.25, -5.5, 5.5).toFixed(2) + "cqw");
-    tiltEl.style.setProperty("--fy", clamp(cur.p * 0.25, -5.5, 5.5).toFixed(2) + "cqw");
-    tiltEl.style.setProperty("--ry", clamp(-cur.r * 0.6, -14, 14).toFixed(2) + "deg");
-    tiltEl.style.setProperty("--rx", clamp(cur.p * 0.6, -14, 14).toFixed(2) + "deg");
-    if (Math.abs(tr - cur.r) < 0.02 && Math.abs(tp - cur.p) < 0.02) { tiltRunning = false; return; }
-    requestAnimationFrame(frame);
+    if (reduce) return;
+    tiltEl.style.setProperty("--fx", clamp(roll * FACE_GAIN, -FACE_MAX, FACE_MAX).toFixed(2) + "cqw");
+    tiltEl.style.setProperty("--fy", clamp(pitch * FACE_GAIN, -FACE_MAX, FACE_MAX).toFixed(2) + "cqw");
+    tiltEl.style.setProperty("--ry", clamp(-roll * ROT_GAIN, -ROT_MAX, ROT_MAX).toFixed(2) + "deg");
+    tiltEl.style.setProperty("--rx", clamp(pitch * ROT_GAIN, -ROT_MAX, ROT_MAX).toFixed(2) + "deg");
   }
 
   // Turns a gravity reading into lean angles, relative to a rest pose that slowly follows wherever the phone is held.
   function updateTilt(a) {
     var x = a.x * flip, y = a.y * flip, z = a.z * flip;
     var roll = Math.asin(clamp(-x / 9.81, -1, 1)) * 57.2958;                    // + = leaning right
-    var yz = Math.sqrt(y * y + z * z);
-    var pitch = yz > 2.5 ? Math.atan2(y, z) * 57.2958 : (pose ? pose.p : 0);    // 0 = flat, 90 = upright
-    if (!pose) { pose = { r: roll, p: pitch }; rest = { r: roll, p: pitch }; }
-    pose.r += (roll - pose.r) * 0.2;
-    pose.p += (pitch - pose.p) * 0.2;
-    rest.r += (pose.r - rest.r) * 0.004;
-    rest.p += (pose.p - rest.p) * 0.004;
-    setTilt(pose.r - rest.r, pose.p - rest.p);
+    var pitch = Math.sqrt(y * y + z * z) > 2.5 ? Math.atan2(y, z) * 57.2958 : lastPitch;   // 0 = flat, 90 = upright
+    lastPitch = pitch;
+    if (!rest) rest = { r: roll, p: pitch };
+    rest.r += (roll - rest.r) * 0.004;
+    rest.p += (pitch - rest.p) * 0.004;
+    setTilt(roll - rest.r, pitch - rest.p);
   }
 
   // Desktop stand-in: the ball leans toward the mouse so the effect can be seen without a phone.
