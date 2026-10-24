@@ -313,11 +313,12 @@
   var lastShakeAt = 0, jolts = [], lx = null, ly = 0, lz = 0;
 
   // Tilt: the window and the 8 travel across the ball like a decal on a sphere, toward whichever side of the phone is lower.
-  // No smoothing: every sensor reading is applied as it arrives.
+  // A light low-pass filter takes the tremor out of the readings; shake detection still reads the raw data.
   var tiltEl = document.getElementById("tilt");
   // iOS reports gravity with the opposite sign to Android.
   var flip = (typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission === "function") ? -1 : 1;
-  var rest = null, lastPitch = 0;
+  var rest = null, pose = null, lastPitch = 0, lastT = 0;
+  var SMOOTH_MS = 80;                       // filter time constant: higher is steadier, lower is more immediate
   var SPHERE_GAIN = 0.33, SPHERE_MAX = 45;   // degrees the ball turns per degree of phone lean, and its limit
 
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
@@ -343,10 +344,15 @@
     var roll = Math.asin(clamp(-x / 9.81, -1, 1)) * 57.2958;                    // + = leaning right
     var pitch = Math.sqrt(y * y + z * z) > 2.5 ? Math.atan2(y, z) * 57.2958 : lastPitch;   // 0 = flat, 90 = upright
     lastPitch = pitch;
-    if (!rest) rest = { r: roll, p: pitch };
-    rest.r += (roll - rest.r) * 0.004;
-    rest.p += (pitch - rest.p) * 0.004;
-    setTilt(roll - rest.r, pitch - rest.p);
+    var now = performance.now();
+    var k = 1 - Math.exp(-Math.min(100, now - lastT) / SMOOTH_MS);
+    lastT = now;
+    if (!pose) { pose = { r: roll, p: pitch }; rest = { r: roll, p: pitch }; }
+    pose.r += (roll - pose.r) * k;
+    pose.p += (pitch - pose.p) * k;
+    rest.r += (pose.r - rest.r) * 0.004;
+    rest.p += (pose.p - rest.p) * 0.004;
+    setTilt(pose.r - rest.r, pose.p - rest.p);
   }
 
   // Desktop stand-in: the ball leans toward the mouse so the effect can be seen without a phone.
