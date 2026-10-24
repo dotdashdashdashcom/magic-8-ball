@@ -105,14 +105,14 @@
     pointer-events: none;
   }
 
-  /* Phone tilt drives these four values: the ball leans in perspective and the window slides toward the lower side. */
+  /* Phone tilt turns the ball's surface under a fixed light. These variables place the window on the sphere:
+     The 41.4cqw reach is the ball's radius (50) times cos of the window's angular radius, so its far edge never passes the rim.
+     --nx/--ny is the direction its centre faces, --fs how much it is foreshortened along that direction, --fa that direction's angle. */
   .tilt {
-    --rx: 0deg;
-    --ry: 0deg;
-    --fx: 0cqw;
-    --fy: 0cqw;
-    transform: perspective(900px) rotateX(var(--rx)) rotateY(var(--ry));
-    will-change: transform;
+    --nx: 0;
+    --ny: 0;
+    --fs: 1;
+    --fa: 0deg;
   }
 
   .ball {
@@ -123,6 +123,7 @@
     width: 100%;
     aspect-ratio: 1;
     border-radius: 50%;
+    overflow: hidden;
     cursor: pointer;
     background: radial-gradient(circle at 32% 24%, var(--ball-hi) 0%, var(--ball-mid) 22%, var(--ball-lo) 62%, #000 100%);
     box-shadow: inset -3cqw -4cqw 8cqw rgba(0, 0, 0, 0.55), inset 2cqw 2cqw 5cqw rgba(255, 255, 255, 0.06);
@@ -140,7 +141,18 @@
     height: 19%;
     border-radius: 50%;
     background: radial-gradient(ellipse at center, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0) 70%);
-    transform: translate(calc(var(--fx) * -1.6), calc(var(--fy) * -1.6)) rotate(-26deg);
+    transform: rotate(-26deg);
+    z-index: 2;
+    pointer-events: none;
+  }
+  /* Limb darkening: the edge of a sphere turns away from the light, whatever is printed on it. */
+  .ball::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    background: radial-gradient(circle at 50% 50%, rgba(0, 0, 0, 0) 60%, rgba(0, 0, 0, 0.32) 86%, rgba(0, 0, 0, 0.62) 100%);
+    z-index: 2;
     pointer-events: none;
   }
   .ball:focus-visible { outline: 3px solid var(--focus); outline-offset: 6px; }
@@ -164,7 +176,8 @@
     top: 50%;
     width: 56%;
     aspect-ratio: 1;
-    transform: translate(calc(-50% + var(--fx)), calc(-50% + var(--fy)));
+    transform: translate(-50%, -50%) translate(calc(var(--nx) * 41.4cqw), calc(var(--ny) * 41.4cqw)) rotate(var(--fa)) scaleX(var(--fs)) rotate(calc(var(--fa) * -1));
+    z-index: 1;
     display: block;
   }
   .eight, .window {
@@ -249,7 +262,6 @@
 
   @media (prefers-reduced-motion: reduce) {
     .ball.shaking { animation: none; }
-    .tilt { transform: none; }
     .eight, .window, .answer { transition-duration: 0.01s; transition-delay: 0s; }
   }
 </style>
@@ -300,23 +312,29 @@
   var needsPermission = false, permissionAsked = false;
   var lastShakeAt = 0, jolts = [], lx = null, ly = 0, lz = 0;
 
-  // Tilt: the ball leans and the window slides toward whichever side of the phone is lower.
+  // Tilt: the window and the 8 travel across the ball like a decal on a sphere, toward whichever side of the phone is lower.
   // No smoothing: every sensor reading is applied as it arrives.
   var tiltEl = document.getElementById("tilt");
   // iOS reports gravity with the opposite sign to Android.
   var flip = (typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission === "function") ? -1 : 1;
   var rest = null, lastPitch = 0;
-  var FACE_GAIN = 0.5, FACE_MAX = 10;     // window slide in % of ball width per degree of lean, and its limit
-  var ROT_GAIN = 1.2, ROT_MAX = 24;       // ball lean in degrees per degree of phone lean, and its limit
+  var SPHERE_GAIN = 0.5, SPHERE_MAX = 45;   // degrees the ball turns per degree of phone lean, and its limit
 
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
+  // Roll and pitch are the phone's lean in degrees. The ball turns about its own centre, so its outline never changes:
+  // only the window moves, shifting toward the edge and squashing along the direction it moves.
   function setTilt(roll, pitch) {
     if (reduce) return;
-    tiltEl.style.setProperty("--fx", clamp(roll * FACE_GAIN, -FACE_MAX, FACE_MAX).toFixed(2) + "cqw");
-    tiltEl.style.setProperty("--fy", clamp(pitch * FACE_GAIN, -FACE_MAX, FACE_MAX).toFixed(2) + "cqw");
-    tiltEl.style.setProperty("--ry", clamp(-roll * ROT_GAIN, -ROT_MAX, ROT_MAX).toFixed(2) + "deg");
-    tiltEl.style.setProperty("--rx", clamp(pitch * ROT_GAIN, -ROT_MAX, ROT_MAX).toFixed(2) + "deg");
+    var psi = clamp(roll * SPHERE_GAIN, -SPHERE_MAX, SPHERE_MAX) * 0.0174533;
+    var th = clamp(pitch * SPHERE_GAIN, -SPHERE_MAX, SPHERE_MAX) * 0.0174533;
+    var nx = Math.sin(psi);
+    var ny = Math.cos(psi) * Math.sin(th);
+    var nz = Math.cos(psi) * Math.cos(th);
+    tiltEl.style.setProperty("--nx", nx.toFixed(4));
+    tiltEl.style.setProperty("--ny", ny.toFixed(4));
+    tiltEl.style.setProperty("--fs", nz.toFixed(4));
+    tiltEl.style.setProperty("--fa", (Math.atan2(ny, nx) * 57.2958).toFixed(2) + "deg");
   }
 
   // Turns a gravity reading into lean angles, relative to a rest pose that slowly follows wherever the phone is held.
@@ -337,7 +355,7 @@
     var r = ball.getBoundingClientRect();
     var nx = (e.clientX - (r.left + r.width / 2)) / (window.innerWidth / 2);
     var ny = (e.clientY - (r.top + r.height / 2)) / (window.innerHeight / 2);
-    setTilt(clamp(nx, -1, 1) * 22, clamp(ny, -1, 1) * 22);
+    setTilt(clamp(nx, -1, 1) * 60, clamp(ny, -1, 1) * 60);
   });
   document.documentElement.addEventListener("mouseleave", function () { if (!live) setTilt(0, 0); });
 
