@@ -318,7 +318,7 @@
   // iOS reports gravity with the opposite sign to Android.
   var flip = (typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission === "function") ? -1 : 1;
   var rest = null, lastPitch = 0;
-  var SPHERE_GAIN = 0.5, SPHERE_MAX = 45;   // degrees the ball turns per degree of phone lean, and its limit
+  var SPHERE_GAIN = 0.33, SPHERE_MAX = 45;   // degrees the ball turns per degree of phone lean, and its limit
 
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
