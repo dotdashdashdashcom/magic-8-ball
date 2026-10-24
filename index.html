@@ -105,6 +105,16 @@
     pointer-events: none;
   }
 
+  /* Phone tilt drives these four values: the ball leans in perspective and the window slides toward the lower side. */
+  .tilt {
+    --rx: 0deg;
+    --ry: 0deg;
+    --fx: 0cqw;
+    --fy: 0cqw;
+    transform: perspective(900px) rotateX(var(--rx)) rotateY(var(--ry));
+    will-change: transform;
+  }
+
   .ball {
     all: unset;
     box-sizing: border-box;
@@ -130,7 +140,7 @@
     height: 19%;
     border-radius: 50%;
     background: radial-gradient(ellipse at center, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0) 70%);
-    transform: rotate(-26deg);
+    transform: translate(calc(var(--fx) * -1.6), calc(var(--fy) * -1.6)) rotate(-26deg);
     pointer-events: none;
   }
   .ball:focus-visible { outline: 3px solid var(--focus); outline-offset: 6px; }
@@ -154,7 +164,7 @@
     top: 50%;
     width: 52%;
     aspect-ratio: 1;
-    transform: translate(-50%, -50%);
+    transform: translate(calc(-50% + var(--fx)), calc(-50% + var(--fy)));
     display: block;
   }
   .eight, .window {
@@ -240,6 +250,7 @@
 
   @media (prefers-reduced-motion: reduce) {
     .ball.shaking { animation: none; }
+    .tilt { transform: none; }
     .eight, .window, .answer { transition-duration: 0.01s; transition-delay: 0s; }
   }
 </style>
@@ -250,6 +261,7 @@
 
 <div class="stage">
   <div class="ball-wrap">
+    <div class="tilt" id="tilt">
     <button class="ball" id="ball" type="button" aria-label="Shake the magic 8 ball">
       <span class="face" id="face" data-state="idle">
         <span class="eight" aria-hidden="true">8</span>
@@ -261,6 +273,7 @@
         </span>
       </span>
     </button>
+    </div>
   </div>
 </div>
 
@@ -286,6 +299,64 @@
   var busy = false, last = -1, live = false, listening = false;
   var needsPermission = false, permissionAsked = false;
   var lastShakeAt = 0, jolts = [], lx = null, ly = 0, lz = 0;
+
+  // Tilt: the ball leans and the window slides toward whichever side of the phone is lower.
+  var tiltEl = document.getElementById("tilt");
+  // iOS reports gravity with the opposite sign to Android.
+  var flip = (typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission === "function") ? -1 : 1;
+  var pose = null, rest = null;
+  var tgt = { r: 0, p: 0 }, cur = { r: 0, p: 0 };
+  var tiltRunning = false, lastFrame = 0;
+
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+  function setTilt(roll, pitch) {
+    tgt.r = roll;
+    tgt.p = pitch;
+    if (reduce || tiltRunning) return;
+    tiltRunning = true;
+    lastFrame = performance.now();
+    requestAnimationFrame(frame);
+  }
+
+  function frame(now) {
+    var dt = Math.min(0.05, (now - lastFrame) / 1000);
+    lastFrame = now;
+    var k = 1 - Math.exp(-dt / 0.12);
+    var tr = busy ? 0 : tgt.r, tp = busy ? 0 : tgt.p;
+    cur.r += (tr - cur.r) * k;
+    cur.p += (tp - cur.p) * k;
+    tiltEl.style.setProperty("--fx", clamp(cur.r * 0.25, -5.5, 5.5).toFixed(2) + "cqw");
+    tiltEl.style.setProperty("--fy", clamp(cur.p * 0.25, -5.5, 5.5).toFixed(2) + "cqw");
+    tiltEl.style.setProperty("--ry", clamp(-cur.r * 0.6, -14, 14).toFixed(2) + "deg");
+    tiltEl.style.setProperty("--rx", clamp(cur.p * 0.6, -14, 14).toFixed(2) + "deg");
+    if (Math.abs(tr - cur.r) < 0.02 && Math.abs(tp - cur.p) < 0.02) { tiltRunning = false; return; }
+    requestAnimationFrame(frame);
+  }
+
+  // Turns a gravity reading into lean angles, relative to a rest pose that slowly follows wherever the phone is held.
+  function updateTilt(a) {
+    var x = a.x * flip, y = a.y * flip, z = a.z * flip;
+    var roll = Math.asin(clamp(-x / 9.81, -1, 1)) * 57.2958;                    // + = leaning right
+    var yz = Math.sqrt(y * y + z * z);
+    var pitch = yz > 2.5 ? Math.atan2(y, z) * 57.2958 : (pose ? pose.p : 0);    // 0 = flat, 90 = upright
+    if (!pose) { pose = { r: roll, p: pitch }; rest = { r: roll, p: pitch }; }
+    pose.r += (roll - pose.r) * 0.2;
+    pose.p += (pitch - pose.p) * 0.2;
+    rest.r += (pose.r - rest.r) * 0.004;
+    rest.p += (pose.p - rest.p) * 0.004;
+    setTilt(pose.r - rest.r, pose.p - rest.p);
+  }
+
+  // Desktop stand-in: the ball leans toward the mouse so the effect can be seen without a phone.
+  window.addEventListener("pointermove", function (e) {
+    if (live || e.pointerType !== "mouse") return;
+    var r = ball.getBoundingClientRect();
+    var nx = (e.clientX - (r.left + r.width / 2)) / (window.innerWidth / 2);
+    var ny = (e.clientY - (r.top + r.height / 2)) / (window.innerHeight / 2);
+    setTilt(clamp(nx, -1, 1) * 22, clamp(ny, -1, 1) * 22);
+  });
+  document.documentElement.addEventListener("mouseleave", function () { if (!live) setTilt(0, 0); });
 
   function setStatus(state, text) {
     statusEl.setAttribute("data-state", state);
@@ -318,8 +389,9 @@
     if (!a || a.x == null || a.y == null || a.z == null) return;
     if (!live) {
       live = true;
-      setStatus("on", "Shake sensor on. Shake your phone.");
+      setStatus("on", "Motion sensor on. Tilt it gently, then shake.");
     }
+    updateTilt(a);
     if (lx !== null) {
       var d = Math.abs(a.x - lx) + Math.abs(a.y - ly) + Math.abs(a.z - lz);
       var now = performance.now();
